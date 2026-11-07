@@ -2,10 +2,11 @@ package main
 
 import(
 	"net/http"
-	"github.com/gin-gonic/gin"
+	"encoding/json"
+	"log/slog"
 )
 
-const addr = "localhost:8080"
+const addr = "127.0.0.1:8080"
 
 type Vinil struct{
 	ID 		string  `json: "id"`
@@ -20,39 +21,59 @@ var vinils = []Vinil{
     {ID: "3", Title: "Sarah Vaughan and Clifford Brown", Artist: "Sarah Vaughan", Price: 39.99},
 }
 
-func main(){
-	router := gin.Default()
-	router.GET("/vinils", getVinil)
-	router.GET("/vinils/:id", getVinilbyID)
-	router.POST("/vinils", postVinil)
-
-	router.Run(addr)
-}
-
-func getVinil(c *gin.Context){
-	c.IndentedJSON(http.StatusOK, vinils)
-}
-
-func postVinil(c *gin.Context){
-	var newVinil Vinil;
-
-	if err := c.BindJSON(&newVinil); err != nil{
-		return;
+func responseJSON(w http.ResponseWriter, code int, payload any){
+	w.Header().Set("Content-type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(payload); err != nil{
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-
-	vinils = append(vinils, newVinil)
-	c.IndentedJSON(http.StatusCreated, newVinil)
 }
 
-func getVinilbyID(c *gin.Context){
-	id := c.Param("id")
+func main(){
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("GET /vinils", getVinils)
+	mux.HandleFunc("GET /vinils/{id}", getVinilById)
+	mux.HandleFunc("POST /vinils", createVinil)
+
+	slog.Info("server start listening", "at", addr)
+	http.ListenAndServe(addr, mux)
+}
+
+func getVinils(w http.ResponseWriter, r *http.Request){
+	w.Header().Set("Content-type", "application/json")
+	responseJSON(w, http.StatusOK, vinils)
+}
+
+func getVinilById(w http.ResponseWriter, r *http.Request){
+	id := r.PathValue("id")
 
 	for _, v := range vinils{
-		if v.ID == id {
-			c.IndentedJSON(http.StatusOK, v)
-			return;
+		if v.ID == id{
+			responseJSON(w, http.StatusOK, v)
+			return
 		}
 	}
 
-	c.IndentedJSON(http.StatusNotFound, gin.H{"message": "vinil doesn't find"})
+	responseJSON(w, http.StatusNotFound, map[string]string{"message": "vinil doesn't exist"})
+}
+
+func createVinil(w http.ResponseWriter, r *http.Request){
+	if r.Method != http.MethodPost{
+		http.Error(w, "Invalid method", http.StatusBadRequest)
+		return
+	}
+
+	var newVinil Vinil
+
+	if err := json.NewDecoder(r.Body).Decode(&newVinil); err != nil{
+		responseJSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	defer r.Body.Close()
+
+	vinils = append(vinils, newVinil)
+
+	responseJSON(w, http.StatusCreated, newVinil)
 }
